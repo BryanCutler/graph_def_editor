@@ -233,6 +233,72 @@ class GraphTest(unittest.TestCase):
     with self.assertRaisesRegex(TypeError, "Node collections cannot be Nodes and Tensors.*"):
       g.get_collection_by_name("mixed_collection")
 
+  def test_queue_runner_collection(self):
+    import numpy as np
+    from tensorflow.python.estimator.inputs.queues.feeding_functions import _enqueue_data as enqueue_data
+    from tensorflow.python.training import coordinator
+    from tensorflow.python.training import queue_runner_impl
+
+    def get_rows(array, row_indices):
+      rows = [array[i] for i in row_indices]
+      return np.vstack(rows)
+
+    tf_g = tf.Graph()
+    with tf_g.as_default():
+      array = np.arange(32).reshape([16, 2])
+      q = enqueue_data(array, capacity=100)
+      batch_size = 3
+      dq_op = q.dequeue_many(batch_size)
+      with tf.Session() as sess:
+        coord = coordinator.Coordinator()
+        threads = queue_runner_impl.start_queue_runners(sess=sess, coord=coord)
+        for i in range(100):
+          indices = [
+            j % array.shape[0]
+            for j in range(batch_size * i, batch_size * (i + 1))
+          ]
+          expected_dq = get_rows(array, indices)
+          dq = sess.run(dq_op)
+          np.testing.assert_array_equal(indices, dq[0])
+          np.testing.assert_array_equal(expected_dq, dq[1])
+        coord.request_stop()
+        coord.join(threads)
+
+    g = gde.Graph(tf_g)
+
+    after_tf_g = g.to_tf_graph()
+    with after_tf_g.as_default():
+      with tf.Session() as sess:
+        coord = coordinator.Coordinator()
+        threads = queue_runner_impl.start_queue_runners(sess=sess, coord=coord)
+        for i in range(100):
+          indices = [
+            j % array.shape[0]
+            for j in range(batch_size * i, batch_size * (i + 1))
+          ]
+          expected_dq = get_rows(array, indices)
+
+          dq_op_tensors = [t.name for t in dq_op]
+          # TODO: call to run hangs and does not finish, dq_op_tensors shape becomes unknown
+          dq = sess.run(dq_op_tensors)
+
+          np.testing.assert_array_equal(indices, dq[0])
+          np.testing.assert_array_equal(expected_dq, dq[1])
+        coord.request_stop()
+        coord.join(threads)
+
+    '''
+    # This also hangs and does not finish
+    g_def = tf_g.as_graph_def()
+    after_tf_g = tf.Graph()
+    with after_tf_g.as_default():
+      with tf.Session() as sess:
+        ops = tf.import_graph_def(g_def, return_elements=[dq_tensor.name for dq_tensor in dq_op])
+        dq = sess.run(ops)
+        print(dq)
+        stop = 10
+    '''
+
 
 if __name__ == "__main__":
   unittest.main()

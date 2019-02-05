@@ -260,6 +260,9 @@ class Graph(object):
       self._passthrough_collections[collection_name] = collection
       if self._collection_name_to_type is not None:
         self._collection_name_to_type[collection_name] = "passthrough"
+    elif collection_name == "queue_runners":
+      if self._collection_name_to_type is not None:
+        self._collection_name_to_type[collection_name] = "queue_runners"
     else:
       raise ValueError("Unknown collection type: {}".format(collection))
 
@@ -1216,6 +1219,8 @@ def _make_collection_defs(tf_g: tf.Graph) -> Iterable[
       collection_type = tf.Operation
     elif issubclass(first_item_type, tf.Tensor):
       collection_type = tf.Tensor
+    elif issubclass(first_item_type, tf.train.QueueRunner):
+      collection_type = tf.train.QueueRunner
     elif first_item_type.__name__ in ("WhileContext", "CondContext"):
       print("Skipping collection {} of type {}.".format(
         collection_name, first_item_type))
@@ -1246,7 +1251,7 @@ def _make_collection_defs(tf_g: tf.Graph) -> Iterable[
         # reason.
         collection_proto.value.bytes_list.value.append(
           var_proto.SerializeToString())
-    elif collection_type in (tf.Operation, tf.Tensor):
+    elif collection_type in (tf.Operation, tf.Tensor, tf.train.QueueRunner):
       # Collection of nodes or tensors; store as node/tensor names
       for item in collection_items:
         collection_proto.value.node_list.value.append(
